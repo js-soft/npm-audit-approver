@@ -1,3 +1,5 @@
+import { Octokit } from "@octokit/rest"
+
 import { createAppJwt } from "./crypto.js"
 import type { IssueComment, PullRequestCommit, PullRequestFile, PullRequestReview } from "./types.js"
 
@@ -8,14 +10,12 @@ export class GitHubClient {
     ) {}
 
     public async createInstallationAccessToken(installationId: number): Promise<string> {
-        const response = await this.request<{ token: string }>({
-            body: {},
-            method: "POST",
-            path: `/app/installations/${installationId}/access_tokens`,
-            token: createAppJwt(this.appId, this.privateKey)
-        })
+        const response = await this.createClient(createAppJwt(this.appId, this.privateKey))
+            .rest.apps.createInstallationAccessToken({
+                installation_id: installationId
+            })
 
-        return response.token
+        return response.data.token
     }
 
     public async listPullRequestCommits(input: {
@@ -24,22 +24,14 @@ export class GitHubClient {
         readonly pullNumber: number
         readonly token: string
     }): Promise<PullRequestCommit[]> {
-        const commits: PullRequestCommit[] = []
-        let path: string | undefined =
-            `/repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}/commits?per_page=100`
+        const client = this.createClient(input.token)
 
-        while (path) {
-            const response = await this.requestWithHeaders<PullRequestCommit[]>({
-                method: "GET",
-                path,
-                token: input.token
-            })
-
-            commits.push(...response.data)
-            path = getNextPagePath(response.headers.get("link"))
-        }
-
-        return commits
+        return await client.paginate(client.rest.pulls.listCommits, {
+            owner: input.owner,
+            per_page: 100,
+            pull_number: input.pullNumber,
+            repo: input.repo
+        })
     }
 
     public async listPullRequestFiles(input: {
@@ -48,21 +40,14 @@ export class GitHubClient {
         readonly pullNumber: number
         readonly token: string
     }): Promise<PullRequestFile[]> {
-        const files: PullRequestFile[] = []
-        let path: string | undefined = `/repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}/files?per_page=100`
+        const client = this.createClient(input.token)
 
-        while (path) {
-            const response = await this.requestWithHeaders<PullRequestFile[]>({
-                method: "GET",
-                path,
-                token: input.token
-            })
-
-            files.push(...response.data)
-            path = getNextPagePath(response.headers.get("link"))
-        }
-
-        return files
+        return await client.paginate(client.rest.pulls.listFiles, {
+            owner: input.owner,
+            per_page: 100,
+            pull_number: input.pullNumber,
+            repo: input.repo
+        })
     }
 
     public async getRepositoryFileText(input: {
@@ -72,31 +57,36 @@ export class GitHubClient {
         readonly ref: string
         readonly token: string
     }): Promise<string | undefined> {
-        const encodedPath = input.path
-            .split("/")
-            .map((segment) => encodeURIComponent(segment))
-            .join("/")
-        const encodedRef = encodeURIComponent(input.ref)
-        const response = await this.requestWithHeaders<
-            RepositoryContentResponse | RepositoryContentResponse[] | undefined
-        >({
-            allowNotFound: true,
-            method: "GET",
-            path: `/repos/${input.owner}/${input.repo}/contents/${encodedPath}?ref=${encodedRef}`,
-            token: input.token
-        })
+        let data: RepositoryContentResponse | RepositoryContentResponse[]
 
-        if (response.data === undefined || Array.isArray(response.data) || response.data.type !== "file") {
+        try {
+            const response = await this.createClient(input.token).rest.repos.getContent({
+                owner: input.owner,
+                path: input.path,
+                ref: input.ref,
+                repo: input.repo
+            })
+
+            data = response.data as RepositoryContentResponse | RepositoryContentResponse[]
+        } catch (error) {
+            if (isGitHubRequestError(error) && error.status === 404) {
+                return undefined
+            }
+
+            throw error
+        }
+
+        if (Array.isArray(data) || data.type !== "file") {
             return undefined
         }
 
-        if (response.data.encoding !== "base64") {
+        if (data.encoding !== "base64") {
             throw new Error(
-                `GitHub API returned ${input.path} with unsupported encoding: ${response.data.encoding ?? "missing"}`
+                `GitHub API returned ${input.path} with unsupported encoding: ${data.encoding ?? "missing"}`
             )
         }
 
-        return Buffer.from(response.data.content.replace(/\s/g, ""), "base64").toString("utf8")
+        return Buffer.from(data.content.replace(/\s/g, ""), "base64").toString("utf8")
     }
 
     public async approvePullRequest(input: {
@@ -106,14 +96,12 @@ export class GitHubClient {
         readonly pullNumber: number
         readonly token: string
     }): Promise<void> {
-        await this.request({
-            body: {
-                ...(input.body === undefined ? {} : { body: input.body }),
-                event: "APPROVE"
-            },
-            method: "POST",
-            path: `/repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}/reviews`,
-            token: input.token
+        await this.createClient(input.token).rest.pulls.createReview({
+            ...(input.body === undefined ? {} : { body: input.body }),
+            event: "APPROVE",
+            owner: input.owner,
+            pull_number: input.pullNumber,
+            repo: input.repo
         })
     }
 
@@ -123,22 +111,19 @@ export class GitHubClient {
         readonly pullNumber: number
         readonly token: string
     }): Promise<PullRequestReview[]> {
-        const reviews: PullRequestReview[] = []
-        let path: string | undefined =
-            `/repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}/reviews?per_page=100`
+        const client = this.createClient(input.token)
+        const reviews = await client.paginate(client.rest.pulls.listReviews, {
+            owner: input.owner,
+            per_page: 100,
+            pull_number: input.pullNumber,
+            repo: input.repo
+        })
 
-        while (path) {
-            const response = await this.requestWithHeaders<PullRequestReview[]>({
-                method: "GET",
-                path,
-                token: input.token
-            })
-
-            reviews.push(...response.data)
-            path = getNextPagePath(response.headers.get("link"))
-        }
-
-        return reviews
+        return reviews.map((review) => ({
+            body: review.body,
+            commit_id: review.commit_id ?? "",
+            state: review.state
+        }))
     }
 
     public async listIssueComments(input: {
@@ -147,22 +132,17 @@ export class GitHubClient {
         readonly issueNumber: number
         readonly token: string
     }): Promise<IssueComment[]> {
-        const comments: IssueComment[] = []
-        let path: string | undefined =
-            `/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments?per_page=100`
+        const client = this.createClient(input.token)
+        const comments = await client.paginate(client.rest.issues.listComments, {
+            issue_number: input.issueNumber,
+            owner: input.owner,
+            per_page: 100,
+            repo: input.repo
+        })
 
-        while (path) {
-            const response = await this.requestWithHeaders<IssueComment[]>({
-                method: "GET",
-                path,
-                token: input.token
-            })
-
-            comments.push(...response.data)
-            path = getNextPagePath(response.headers.get("link"))
-        }
-
-        return comments
+        return comments.map((comment) => ({
+            body: comment.body ?? null
+        }))
     }
 
     public async createIssueComment(input: {
@@ -172,63 +152,25 @@ export class GitHubClient {
         readonly issueNumber: number
         readonly token: string
     }): Promise<void> {
-        await this.request({
-            body: {
-                body: input.body
-            },
-            method: "POST",
-            path: `/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments`,
-            token: input.token
+        await this.createClient(input.token).rest.issues.createComment({
+            body: input.body,
+            issue_number: input.issueNumber,
+            owner: input.owner,
+            repo: input.repo
         })
     }
 
-    private async request<T = unknown>(input: RequestInput): Promise<T> {
-        const response = await this.requestWithHeaders<T>(input)
-
-        return response.data
-    }
-
-    private async requestWithHeaders<T = unknown>(input: RequestInput): Promise<{ data: T; headers: Headers }> {
-        const url = input.path.startsWith("http") ? input.path : `https://api.github.com${input.path}`
-        const response = await fetch(url, {
-            body: input.body === undefined ? undefined : JSON.stringify(input.body),
-            headers: {
-                accept: "application/vnd.github+json",
-                authorization: `Bearer ${input.token}`,
-                "content-type": "application/json",
-                "user-agent": "js-soft-npm-audit-approver",
-                "x-github-api-version": "2022-11-28"
+    private createClient(token: string): Octokit {
+        return new Octokit({
+            auth: token,
+            request: {
+                headers: {
+                    "X-GitHub-Api-Version": "2022-11-28"
+                }
             },
-            method: input.method
+            userAgent: "js-soft-npm-audit-approver"
         })
-
-        if (response.status === 404 && input.allowNotFound) {
-            return { data: undefined as T, headers: response.headers }
-        }
-
-        if (!response.ok) {
-            const responseBody = await response.text()
-
-            throw new Error(`GitHub API ${input.method} ${url} failed with ${response.status}: ${responseBody}`)
-        }
-
-        if (response.status === 204) {
-            return { data: undefined as T, headers: response.headers }
-        }
-
-        return {
-            data: (await response.json()) as T,
-            headers: response.headers
-        }
     }
-}
-
-interface RequestInput {
-    readonly allowNotFound?: boolean
-    readonly body?: unknown
-    readonly method: "GET" | "POST"
-    readonly path: string
-    readonly token: string
 }
 
 interface RepositoryContentResponse {
@@ -237,19 +179,6 @@ interface RepositoryContentResponse {
     readonly type: string
 }
 
-function getNextPagePath(linkHeader: string | null): string | undefined {
-    if (!linkHeader) return undefined
-
-    const nextLink = linkHeader
-        .split(",")
-        .map((link) => link.trim())
-        .find((link) => link.endsWith('rel="next"'))
-
-    if (!nextLink) return undefined
-
-    const match = nextLink.match(/^<([^>]+)>/)
-
-    if (!match) return undefined
-
-    return match[1]
+function isGitHubRequestError(error: unknown): error is { readonly status: number } {
+    return typeof error === "object" && error !== null && "status" in error && typeof error.status === "number"
 }

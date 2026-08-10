@@ -16,5 +16,8 @@
         "better-npm-audit": "^3.11.0",
         "tsx": "4.10.0",
         "typescript": "^5.9.3"
+    },
+    "dependencies": {
+        "@octokit/rest": "^22.0.1"
     }
 }
