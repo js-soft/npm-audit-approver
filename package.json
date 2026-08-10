@@ -1,5 +1,5 @@
 {
-    "name": "@js-soft/auto-approve-github-app",
+    "name": "@js-soft/npm-audit-auto-approval",
     "private": true,
     "type": "module",
     "engines": {

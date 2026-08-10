@@ -1,4 +1,4 @@
-# Auto Approve GitHub App
+# npm-audit-auto-approval
 
 Small GitHub App webhook service that approves selected pull requests so GitHub auto-merge can proceed when branch protection requires an approval.
 

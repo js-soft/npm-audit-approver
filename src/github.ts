@@ -98,7 +98,7 @@ export class GitHubClient {
                 accept: "application/vnd.github+json",
                 authorization: `Bearer ${input.token}`,
                 "content-type": "application/json",
-                "user-agent": "js-soft-auto-approve-github-app",
+                "user-agent": "js-soft-npm-audit-auto-approval",
                 "x-github-api-version": "2022-11-28"
             },
             method: input.method
