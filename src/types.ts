@@ -12,10 +12,14 @@ export interface PullRequestWebhookPayload {
         readonly id: number
     }
     readonly pull_request: {
+        readonly base: {
+            readonly sha: string
+        }
         readonly draft?: boolean
         readonly head: {
             readonly sha: string
         }
+        readonly labels?: readonly PullRequestLabel[]
         readonly number: number
     }
     readonly repository: {
@@ -36,10 +40,27 @@ export interface PullRequestCommit {
     }
 }
 
+export interface PullRequestFile {
+    readonly filename: string
+}
+
+export interface PullRequestLabel {
+    readonly name: string
+}
+
 export interface PullRequestReview {
     readonly body: string | null
     readonly commit_id: string
     readonly state: string
+}
+
+export interface ApprovalInput {
+    readonly approvedAuthorEmail: string
+    readonly baseNsprcContent?: string
+    readonly commits: readonly PullRequestCommit[]
+    readonly files: readonly PullRequestFile[]
+    readonly headNsprcContent?: string
+    readonly labels: readonly PullRequestLabel[]
 }
 
 export interface ApprovalDecision {

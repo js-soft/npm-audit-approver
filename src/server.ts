@@ -78,13 +78,47 @@ async function handleWebhook(
     const repo = payload.repository.name
     const pullNumber = payload.pull_request.number
     const token = await githubClient.createInstallationAccessToken(installationId)
-    const commits = await githubClient.listPullRequestCommits({
-        owner,
-        pullNumber,
-        repo,
-        token
+    const [commits, files] = await Promise.all([
+        githubClient.listPullRequestCommits({
+            owner,
+            pullNumber,
+            repo,
+            token
+        }),
+        githubClient.listPullRequestFiles({
+            owner,
+            pullNumber,
+            repo,
+            token
+        })
+    ])
+    const nsprcChanged = files.some((file) => file.filename === ".nsprc")
+    const [baseNsprcContent, headNsprcContent] = nsprcChanged
+        ? await Promise.all([
+              githubClient.getRepositoryFileText({
+                  owner,
+                  path: ".nsprc",
+                  ref: payload.pull_request.base.sha,
+                  repo,
+                  token
+              }),
+              githubClient.getRepositoryFileText({
+                  owner,
+                  path: ".nsprc",
+                  ref: payload.pull_request.head.sha,
+                  repo,
+                  token
+              })
+          ])
+        : [undefined, undefined]
+    const decision = decideApproval({
+        approvedAuthorEmail: config.approvedAuthorEmail,
+        baseNsprcContent,
+        commits,
+        files,
+        headNsprcContent,
+        labels: payload.pull_request.labels ?? []
     })
-    const decision = decideApproval(commits, config.approvedAuthorEmail)
 
     if (!decision.approve) {
         console.info(`Skipping ${owner}/${repo}#${pullNumber}: ${decision.reason}`)

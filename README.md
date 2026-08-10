@@ -2,7 +2,13 @@
 
 Small GitHub App webhook service that approves selected pull requests so GitHub auto-merge can proceed when branch protection requires an approval.
 
-For the initial implementation, the app approves a pull request only when every commit currently on the pull request has `commit.author.email` equal to `ci@js-soft.com`. The email is configurable through `APPROVED_AUTHOR_EMAIL`.
+The app approves a pull request only when all of these conditions are true:
+
+- Every commit currently on the pull request has `commit.author.email` equal to `ci@js-soft.com`. The email is configurable through `APPROVED_AUTHOR_EMAIL`.
+- The pull request only changes `package-lock.json` and/or `.nsprc`.
+- The pull request has a `dependencies` or `chore` label.
+- The pull request adds at most 2 new top-level exception entries to `.nsprc`.
+- Every added `.nsprc` exception has a `severity` field of `low`, `medium`, or `moderate`.
 
 ## GitHub App Setup
 
@@ -13,6 +19,7 @@ Create a GitHub App with:
 - Subscribe to events: `Pull request`
 - Repository permissions:
     - Pull requests: `Read and write`
+    - Contents: `Read-only`
     - Metadata: `Read-only`, granted automatically by GitHub
 
 Install the app on the repositories that should receive automatic approvals.
@@ -47,4 +54,4 @@ The service exposes `GET /healthz` for health checks and `POST /webhook` for Git
 
 ## Security Note
 
-Git commit author emails can be spoofed. This first version intentionally implements only the requested condition. Before broad production use, add checks for trusted repositories, branch names, PR labels, check runs, signed commits, or the exact workflow/app actor that created the PR.
+Git commit author emails and labels can be spoofed by users with sufficient repository access. Before broad production use, add checks for trusted repositories, branch names, check runs, signed commits, or the exact workflow/app actor that created the PR.

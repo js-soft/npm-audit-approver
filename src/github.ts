@@ -1,5 +1,5 @@
 import { createAppJwt } from "./crypto.js"
-import type { PullRequestCommit, PullRequestReview } from "./types.js"
+import type { PullRequestCommit, PullRequestFile, PullRequestReview } from "./types.js"
 
 export class GitHubClient {
     public constructor(
@@ -40,6 +40,63 @@ export class GitHubClient {
         }
 
         return commits
+    }
+
+    public async listPullRequestFiles(input: {
+        readonly owner: string
+        readonly repo: string
+        readonly pullNumber: number
+        readonly token: string
+    }): Promise<PullRequestFile[]> {
+        const files: PullRequestFile[] = []
+        let path: string | undefined = `/repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}/files?per_page=100`
+
+        while (path) {
+            const response = await this.requestWithHeaders<PullRequestFile[]>({
+                method: "GET",
+                path,
+                token: input.token
+            })
+
+            files.push(...response.data)
+            path = getNextPagePath(response.headers.get("link"))
+        }
+
+        return files
+    }
+
+    public async getRepositoryFileText(input: {
+        readonly owner: string
+        readonly repo: string
+        readonly path: string
+        readonly ref: string
+        readonly token: string
+    }): Promise<string | undefined> {
+        const encodedPath = input.path
+            .split("/")
+            .map((segment) => encodeURIComponent(segment))
+            .join("/")
+        const encodedRef = encodeURIComponent(input.ref)
+        const response = await this.requestWithHeaders<
+            RepositoryContentResponse | RepositoryContentResponse[] | undefined
+        >({
+            allowNotFound: true,
+            method: "GET",
+            path: `/repos/${input.owner}/${input.repo}/contents/${encodedPath}?ref=${encodedRef}`,
+            token: input.token
+        })
+
+        if (response.data === undefined || Array.isArray(response.data) || response.data.type !== "file") {
+            return undefined
+        }
+
+        if (response.data.encoding !== "base64") {
+            throw new Error(
+                `GitHub API returned ${input.path} with unsupported encoding: ${response.data.encoding ?? "missing"}`
+            )
+        }
+
+        return Buffer.from(response.data.content.replace(/\s/g, ""), "base64").toString("utf8")
     }
 
     public async approvePullRequest(input: {
@@ -104,6 +161,10 @@ export class GitHubClient {
             method: input.method
         })
 
+        if (response.status === 404 && input.allowNotFound) {
+            return { data: undefined as T, headers: response.headers }
+        }
+
         if (!response.ok) {
             const responseBody = await response.text()
 
@@ -122,10 +183,17 @@ export class GitHubClient {
 }
 
 interface RequestInput {
+    readonly allowNotFound?: boolean
     readonly body?: unknown
     readonly method: "GET" | "POST"
     readonly path: string
     readonly token: string
+}
+
+interface RepositoryContentResponse {
+    readonly content: string
+    readonly encoding?: string
+    readonly type: string
 }
 
 function getNextPagePath(linkHeader: string | null): string | undefined {
