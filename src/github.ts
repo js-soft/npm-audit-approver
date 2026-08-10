@@ -1,5 +1,5 @@
 import { createAppJwt } from "./crypto.js"
-import type { PullRequestCommit, PullRequestFile, PullRequestReview } from "./types.js"
+import type { IssueComment, PullRequestCommit, PullRequestFile, PullRequestReview } from "./types.js"
 
 export class GitHubClient {
     public constructor(
@@ -100,7 +100,7 @@ export class GitHubClient {
     }
 
     public async approvePullRequest(input: {
-        readonly body: string
+        readonly body?: string
         readonly owner: string
         readonly repo: string
         readonly pullNumber: number
@@ -108,7 +108,7 @@ export class GitHubClient {
     }): Promise<void> {
         await this.request({
             body: {
-                body: input.body,
+                ...(input.body === undefined ? {} : { body: input.body }),
                 event: "APPROVE"
             },
             method: "POST",
@@ -139,6 +139,47 @@ export class GitHubClient {
         }
 
         return reviews
+    }
+
+    public async listIssueComments(input: {
+        readonly owner: string
+        readonly repo: string
+        readonly issueNumber: number
+        readonly token: string
+    }): Promise<IssueComment[]> {
+        const comments: IssueComment[] = []
+        let path: string | undefined =
+            `/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments?per_page=100`
+
+        while (path) {
+            const response = await this.requestWithHeaders<IssueComment[]>({
+                method: "GET",
+                path,
+                token: input.token
+            })
+
+            comments.push(...response.data)
+            path = getNextPagePath(response.headers.get("link"))
+        }
+
+        return comments
+    }
+
+    public async createIssueComment(input: {
+        readonly body: string
+        readonly owner: string
+        readonly repo: string
+        readonly issueNumber: number
+        readonly token: string
+    }): Promise<void> {
+        await this.request({
+            body: {
+                body: input.body
+            },
+            method: "POST",
+            path: `/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments`,
+            token: input.token
+        })
     }
 
     private async request<T = unknown>(input: RequestInput): Promise<T> {

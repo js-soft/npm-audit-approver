@@ -48,6 +48,10 @@ export interface PullRequestLabel {
     readonly name: string
 }
 
+export interface IssueComment {
+    readonly body: string | null
+}
+
 export interface PullRequestReview {
     readonly body: string | null
     readonly commit_id: string
