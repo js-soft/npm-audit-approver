@@ -1,0 +1,19 @@
+{
+    "name": "@js-soft/auto-approve-github-app",
+    "private": true,
+    "type": "module",
+    "engines": {
+        "node": ">=26"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "dev": "node --import tsx src/index.ts",
+        "start": "node dist/index.js",
+        "test": "node --import tsx --test src/*.test.ts"
+    },
+    "devDependencies": {
+        "@types/node": "^25.9.1",
+        "tsx": "^4.21.0",
+        "typescript": "^5.9.3"
+    }
+}
