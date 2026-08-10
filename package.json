@@ -1,5 +1,5 @@
 {
-    "name": "@js-soft/npm-audit-auto-approval",
+    "name": "@js-soft/npm-audit-approver",
     "private": true,
     "type": "module",
     "engines": {
