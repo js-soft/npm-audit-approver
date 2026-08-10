@@ -13,6 +13,7 @@
     },
     "devDependencies": {
         "@types/node": "^25.9.1",
+        "better-npm-audit": "^3.11.0",
         "tsx": "^4.21.0",
         "typescript": "^5.9.3"
     }
