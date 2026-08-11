@@ -89,6 +89,25 @@ export class GitHubClient {
         return Buffer.from(data.content.replace(/\s/g, ""), "base64").toString("utf8")
     }
 
+    public async getGlobalSecurityAdvisorySeverity(input: {
+        readonly ghsaId: string
+        readonly token: string
+    }): Promise<string | undefined> {
+        try {
+            const response = await this.createClient(input.token).rest.securityAdvisories.getGlobalAdvisory({
+                ghsa_id: input.ghsaId
+            })
+
+            return response.data.severity
+        } catch (error) {
+            if (isGitHubRequestError(error) && error.status === 404) {
+                return undefined
+            }
+
+            throw error
+        }
+    }
+
     public async approvePullRequest(input: {
         readonly body?: string
         readonly owner: string

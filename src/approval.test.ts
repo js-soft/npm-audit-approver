@@ -8,8 +8,8 @@ test("evaluates pull requests when a label is added", () => {
     assert.equal(pullRequestActionsToEvaluate.has("labeled"), true)
 })
 
-test("approves when every commit is authored by the approved email", () => {
-    const decision = decideApproval({
+test("approves when every commit is authored by the approved email", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         commits: [commit("1111111", "ci@js-soft.com"), commit("2222222", "CI@JS-SOFT.COM")]
     })
@@ -17,8 +17,8 @@ test("approves when every commit is authored by the approved email", () => {
     assert.equal(decision.approve, true)
 })
 
-test("does not approve when a commit has a different author email", () => {
-    const decision = decideApproval({
+test("does not approve when a commit has a different author email", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         commits: [commit("1111111", "ci@js-soft.com"), commit("2222222", "person@example.com")]
     })
@@ -28,8 +28,8 @@ test("does not approve when a commit has a different author email", () => {
     assert.equal(decision.shouldComment, true)
 })
 
-test("does not approve pull requests without commits", () => {
-    const decision = decideApproval({
+test("does not approve pull requests without commits", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         commits: []
     })
@@ -38,8 +38,8 @@ test("does not approve pull requests without commits", () => {
     assert.equal(decision.shouldComment, false)
 })
 
-test("does not comment when no commit is authored by the approved email", () => {
-    const decision = decideApproval({
+test("does not comment when no commit is authored by the approved email", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         commits: [commit("1111111", "person@example.com"), commit("2222222", "other@example.com")]
     })
@@ -49,8 +49,8 @@ test("does not comment when no commit is authored by the approved email", () => 
     assert.equal(decision.shouldComment, false)
 })
 
-test("does not approve when files outside package-lock.json and .nsprc changed", () => {
-    const decision = decideApproval({
+test("does not approve when files outside package-lock.json and .nsprc changed", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         files: [{ filename: "package-lock.json" }, { filename: "src/index.ts" }]
     })
@@ -59,8 +59,8 @@ test("does not approve when files outside package-lock.json and .nsprc changed",
     assert.match(decision.reason, /src\/index\.ts/)
 })
 
-test("does not approve without dependencies or chore label", () => {
-    const decision = decideApproval({
+test("does not approve without dependencies or chore label", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         labels: [{ name: "security" }]
     })
@@ -69,8 +69,8 @@ test("does not approve without dependencies or chore label", () => {
     assert.match(decision.reason, /dependencies or chore/)
 })
 
-test("approves at most two added low or medium nsprc exceptions", () => {
-    const decision = decideApproval({
+test("approves at most two added low, medium, or moderate nsprc exceptions using GitHub advisory severities", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         baseNsprcContent: JSON.stringify({
             "GHSA-existing": {
@@ -78,15 +78,20 @@ test("approves at most two added low or medium nsprc exceptions", () => {
             }
         }),
         files: [{ filename: "package-lock.json" }, { filename: ".nsprc" }],
+        getVulnerabilitySeverity: async (id) =>
+            new Map([
+                ["GHSA-low", "Low"],
+                ["GHSA-medium", "Medium"]
+            ]).get(id),
         headNsprcContent: JSON.stringify({
             "GHSA-existing": {
                 severity: "high"
             },
             "GHSA-low": {
-                severity: "Low"
+                severity: "high"
             },
             "GHSA-medium": {
-                severity: "Medium"
+                severity: "critical"
             }
         })
     })
@@ -94,8 +99,8 @@ test("approves at most two added low or medium nsprc exceptions", () => {
     assert.equal(decision.approve, true)
 })
 
-test("does not approve more than two added nsprc exceptions", () => {
-    const decision = decideApproval({
+test("does not approve more than two added nsprc exceptions", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         baseNsprcContent: "{}",
         files: [{ filename: ".nsprc" }],
@@ -116,14 +121,15 @@ test("does not approve more than two added nsprc exceptions", () => {
     assert.match(decision.reason, /more than 2/)
 })
 
-test("does not approve added nsprc exceptions above medium severity", () => {
-    const decision = decideApproval({
+test("does not approve added nsprc exceptions above moderate severity from GitHub", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         baseNsprcContent: "{}",
         files: [{ filename: ".nsprc" }],
+        getVulnerabilitySeverity: async () => "high",
         headNsprcContent: JSON.stringify({
             "GHSA-high": {
-                severity: "high"
+                severity: "low"
             }
         })
     })
@@ -132,8 +138,8 @@ test("does not approve added nsprc exceptions above medium severity", () => {
     assert.match(decision.reason, /GHSA-high:high/)
 })
 
-test("does not approve added nsprc exceptions without severity", () => {
-    const decision = decideApproval({
+test("does not approve added nsprc exceptions without GitHub severity", async () => {
+    const decision = await decideApproval({
         ...approvalInput(),
         baseNsprcContent: "{}",
         files: [{ filename: ".nsprc" }],
@@ -143,7 +149,7 @@ test("does not approve added nsprc exceptions without severity", () => {
     })
 
     assert.equal(decision.approve, false)
-    assert.match(decision.reason, /GHSA-missing:missing-severity/)
+    assert.match(decision.reason, /GHSA-missing:missing-github-severity/)
 })
 
 function approvalInput(): ApprovalInput {
@@ -151,6 +157,7 @@ function approvalInput(): ApprovalInput {
         approvedAuthorEmail: "ci@js-soft.com",
         commits: [commit("1111111", "ci@js-soft.com")],
         files: [{ filename: "package-lock.json" }],
+        getVulnerabilitySeverity: async () => undefined,
         labels: [{ name: "dependencies" }]
     }
 }

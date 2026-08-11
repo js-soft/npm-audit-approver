@@ -8,7 +8,7 @@ The app approves a pull request only when all of these conditions are true:
 - The pull request only changes `package-lock.json` and/or `.nsprc`.
 - The pull request has a `dependencies` or `chore` label.
 - The pull request adds at most 2 new top-level exception entries to `.nsprc`.
-- Every added `.nsprc` exception has a `severity` field of `low`, `medium`, or `moderate`.
+- GitHub's global security advisory for every added `.nsprc` exception id has a severity of `low`, `medium`, or `moderate`.
 
 Approvals are submitted without a review body. When the app does not approve a pull request, it adds a pull request comment explaining why, unless none of the pull request commits were authored by the configured approved author.
 

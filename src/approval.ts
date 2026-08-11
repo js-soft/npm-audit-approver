@@ -7,7 +7,7 @@ const labelsAllowedToApprove = new Set(["chore", "dependencies"])
 const allowedAddedExceptionSeverities = new Set(["low", "medium", "moderate"])
 const maxAddedNsprcExceptions = 2
 
-export function decideApproval(input: ApprovalInput): ApprovalDecision {
+export async function decideApproval(input: ApprovalInput): Promise<ApprovalDecision> {
     const authorDecision = decideCommitAuthorApproval(input.commits, input.approvedAuthorEmail)
 
     if (!authorDecision.approve) return authorDecision
@@ -20,7 +20,11 @@ export function decideApproval(input: ApprovalInput): ApprovalDecision {
 
     if (!labelsDecision.approve) return labelsDecision
 
-    const nsprcDecision = decideNsprcApproval(input.baseNsprcContent, input.headNsprcContent)
+    const nsprcDecision = await decideNsprcApproval(
+        input.baseNsprcContent,
+        input.headNsprcContent,
+        input.getVulnerabilitySeverity
+    )
 
     if (!nsprcDecision.approve) return nsprcDecision
 
@@ -123,7 +127,11 @@ function decideLabelsApproval(labels: ApprovalInput["labels"]): ApprovalDecision
     }
 }
 
-function decideNsprcApproval(baseContent: string | undefined, headContent: string | undefined): ApprovalDecision {
+async function decideNsprcApproval(
+    baseContent: string | undefined,
+    headContent: string | undefined,
+    getVulnerabilitySeverity: (id: string) => Promise<string | undefined>
+): Promise<ApprovalDecision> {
     const baseExceptions = parseNsprc(baseContent, "base")
     const headExceptions = parseNsprc(headContent, "head")
 
@@ -140,28 +148,32 @@ function decideNsprcApproval(baseContent: string | undefined, headContent: strin
         }
     }
 
-    const addedExceptionsWithDisallowedSeverity = addedExceptions.filter((id) => {
-        const severity = getExceptionSeverity(headExceptions.exceptions.get(id))
-
-        return !severity || !allowedAddedExceptionSeverities.has(severity)
-    })
+    const addedExceptionSeverities = await Promise.all(
+        addedExceptions.map(async (id) => ({
+            id,
+            severity: normalizeSeverity(await getVulnerabilitySeverity(id))
+        }))
+    )
+    const addedExceptionsWithDisallowedSeverity = addedExceptionSeverities.filter(
+        ({ severity }) => !severity || !allowedAddedExceptionSeverities.has(severity)
+    )
 
     if (addedExceptionsWithDisallowedSeverity.length > 0) {
         const examples = addedExceptionsWithDisallowedSeverity
             .slice(0, 3)
-            .map((id) => `${id}:${getExceptionSeverity(headExceptions.exceptions.get(id)) ?? "missing-severity"}`)
+            .map(({ id, severity }) => `${id}:${severity ?? "missing-github-severity"}`)
             .join(", ")
 
         return {
             approve: false,
-            reason: `.nsprc adds exception(s) that are not low or medium severity: ${examples}`,
+            reason: `.nsprc adds exception(s) that are not low, medium, or moderate severity: ${examples}`,
             shouldComment: true
         }
     }
 
     return {
         approve: true,
-        reason: `.nsprc adds ${addedExceptions.length} low or medium severity exception(s)`,
+        reason: `.nsprc adds ${addedExceptions.length} low, medium, or moderate severity exception(s)`,
         shouldComment: false
     }
 }
@@ -210,12 +222,8 @@ function parseNsprc(
     }
 }
 
-function getExceptionSeverity(exception: unknown): string | undefined {
-    if (!isPlainObject(exception)) return undefined
-
-    const severity = exception.severity
-
-    return typeof severity === "string" ? severity.trim().toLowerCase() : undefined
+function normalizeSeverity(severity: string | undefined): string | undefined {
+    return severity?.trim().toLowerCase()
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

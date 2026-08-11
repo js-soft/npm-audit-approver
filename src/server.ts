@@ -111,11 +111,16 @@ async function handleWebhook(
               })
           ])
         : [undefined, undefined]
-    const decision = decideApproval({
+    const decision = await decideApproval({
         approvedAuthorEmail: config.approvedAuthorEmail,
         baseNsprcContent,
         commits,
         files,
+        getVulnerabilitySeverity: (id) =>
+            githubClient.getGlobalSecurityAdvisorySeverity({
+                ghsaId: id,
+                token
+            }),
         headNsprcContent,
         labels: payload.pull_request.labels ?? []
     })

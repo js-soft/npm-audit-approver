@@ -63,6 +63,7 @@ export interface ApprovalInput {
     readonly baseNsprcContent?: string
     readonly commits: readonly PullRequestCommit[]
     readonly files: readonly PullRequestFile[]
+    readonly getVulnerabilitySeverity: (id: string) => Promise<string | undefined>
     readonly headNsprcContent?: string
     readonly labels: readonly PullRequestLabel[]
 }
