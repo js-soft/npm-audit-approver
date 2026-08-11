@@ -31,7 +31,8 @@ export function decideApproval(input: ApprovalInput): ApprovalDecision {
             filesDecision.reason,
             labelsDecision.reason,
             nsprcDecision.reason
-        ].join("; ")
+        ].join("; "),
+        shouldComment: false
     }
 }
 
@@ -42,12 +43,14 @@ function decideCommitAuthorApproval(
     if (commits.length === 0) {
         return {
             approve: false,
-            reason: "pull request has no commits"
+            reason: "pull request has no commits",
+            shouldComment: false
         }
     }
 
     const expectedEmail = approvedAuthorEmail.toLowerCase()
     const commitsWithDifferentAuthor = commits.filter((commit) => getAuthorEmail(commit) !== expectedEmail)
+    const commitsWithApprovedAuthor = commits.filter((commit) => getAuthorEmail(commit) === expectedEmail)
 
     if (commitsWithDifferentAuthor.length > 0) {
         const examples = commitsWithDifferentAuthor
@@ -57,13 +60,15 @@ function decideCommitAuthorApproval(
 
         return {
             approve: false,
-            reason: `not every commit is authored by ${approvedAuthorEmail}; mismatches: ${examples}`
+            reason: `not every commit is authored by ${approvedAuthorEmail}; mismatches: ${examples}`,
+            shouldComment: commitsWithApprovedAuthor.length > 0
         }
     }
 
     return {
         approve: true,
-        reason: `all ${commits.length} commit(s) are authored by ${approvedAuthorEmail}`
+        reason: `all ${commits.length} commit(s) are authored by ${approvedAuthorEmail}`,
+        shouldComment: false
     }
 }
 
@@ -71,7 +76,8 @@ function decideChangedFilesApproval(files: ApprovalInput["files"]): ApprovalDeci
     if (files.length === 0) {
         return {
             approve: false,
-            reason: "pull request has no changed files"
+            reason: "pull request has no changed files",
+            shouldComment: true
         }
     }
 
@@ -85,13 +91,15 @@ function decideChangedFilesApproval(files: ApprovalInput["files"]): ApprovalDeci
 
         return {
             approve: false,
-            reason: `pull request changes files outside package-lock.json and .nsprc: ${examples}`
+            reason: `pull request changes files outside package-lock.json and .nsprc: ${examples}`,
+            shouldComment: true
         }
     }
 
     return {
         approve: true,
-        reason: "only package-lock.json and .nsprc are changed"
+        reason: "only package-lock.json and .nsprc are changed",
+        shouldComment: false
     }
 }
 
@@ -103,13 +111,15 @@ function decideLabelsApproval(labels: ApprovalInput["labels"]): ApprovalDecision
     if (!matchingLabel) {
         return {
             approve: false,
-            reason: "pull request does not have a dependencies or chore label"
+            reason: "pull request does not have a dependencies or chore label",
+            shouldComment: true
         }
     }
 
     return {
         approve: true,
-        reason: `pull request has the ${matchingLabel} label`
+        reason: `pull request has the ${matchingLabel} label`,
+        shouldComment: false
     }
 }
 
@@ -125,7 +135,8 @@ function decideNsprcApproval(baseContent: string | undefined, headContent: strin
     if (addedExceptions.length > maxAddedNsprcExceptions) {
         return {
             approve: false,
-            reason: `.nsprc adds ${addedExceptions.length} exception(s), which is more than ${maxAddedNsprcExceptions}`
+            reason: `.nsprc adds ${addedExceptions.length} exception(s), which is more than ${maxAddedNsprcExceptions}`,
+            shouldComment: true
         }
     }
 
@@ -143,13 +154,15 @@ function decideNsprcApproval(baseContent: string | undefined, headContent: strin
 
         return {
             approve: false,
-            reason: `.nsprc adds exception(s) that are not low or medium severity: ${examples}`
+            reason: `.nsprc adds exception(s) that are not low or medium severity: ${examples}`,
+            shouldComment: true
         }
     }
 
     return {
         approve: true,
-        reason: `.nsprc adds ${addedExceptions.length} low or medium severity exception(s)`
+        reason: `.nsprc adds ${addedExceptions.length} low or medium severity exception(s)`,
+        shouldComment: false
     }
 }
 
@@ -174,7 +187,8 @@ function parseNsprc(
             ok: false,
             decision: {
                 approve: false,
-                reason: `${refName} .nsprc is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+                reason: `${refName} .nsprc is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+                shouldComment: true
             }
         }
     }
@@ -184,7 +198,8 @@ function parseNsprc(
             ok: false,
             decision: {
                 approve: false,
-                reason: `${refName} .nsprc must be a JSON object`
+                reason: `${refName} .nsprc must be a JSON object`,
+                shouldComment: true
             }
         }
     }

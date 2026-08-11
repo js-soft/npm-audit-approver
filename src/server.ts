@@ -121,27 +121,36 @@ async function handleWebhook(
     })
 
     if (!decision.approve) {
-        const commentBody = `Automatic approval was not made because ${decision.reason}.`
-        const existingComments = await githubClient.listIssueComments({
-            issueNumber: pullNumber,
-            owner,
-            repo,
-            token
-        })
-        const alreadyCommented = existingComments.some((comment) => comment.body === commentBody)
+        let alreadyCommented = false
 
-        if (!alreadyCommented) {
-            await githubClient.createIssueComment({
-                body: commentBody,
+        if (decision.shouldComment) {
+            const commentBody = `Automatic approval was not made because ${decision.reason}.`
+            const existingComments = await githubClient.listIssueComments({
                 issueNumber: pullNumber,
                 owner,
                 repo,
                 token
             })
+            alreadyCommented = existingComments.some((comment) => comment.body === commentBody)
+
+            if (!alreadyCommented) {
+                await githubClient.createIssueComment({
+                    body: commentBody,
+                    issueNumber: pullNumber,
+                    owner,
+                    repo,
+                    token
+                })
+            }
         }
 
         console.info(`Skipping ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
-        sendJson(response, 202, { approved: false, alreadyCommented, reason: decision.reason })
+        sendJson(response, 202, {
+            approved: false,
+            alreadyCommented,
+            commentSkipped: !decision.shouldComment,
+            reason: decision.reason
+        })
         return
     }
 

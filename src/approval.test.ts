@@ -25,6 +25,7 @@ test("does not approve when a commit has a different author email", () => {
 
     assert.equal(decision.approve, false)
     assert.match(decision.reason, /person@example.com/)
+    assert.equal(decision.shouldComment, true)
 })
 
 test("does not approve pull requests without commits", () => {
@@ -34,6 +35,18 @@ test("does not approve pull requests without commits", () => {
     })
 
     assert.equal(decision.approve, false)
+    assert.equal(decision.shouldComment, false)
+})
+
+test("does not comment when no commit is authored by the approved email", () => {
+    const decision = decideApproval({
+        ...approvalInput(),
+        commits: [commit("1111111", "person@example.com"), commit("2222222", "other@example.com")]
+    })
+
+    assert.equal(decision.approve, false)
+    assert.match(decision.reason, /person@example.com/)
+    assert.equal(decision.shouldComment, false)
 })
 
 test("does not approve when files outside package-lock.json and .nsprc changed", () => {

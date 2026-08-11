@@ -70,4 +70,5 @@ export interface ApprovalInput {
 export interface ApprovalDecision {
     readonly approve: boolean
     readonly reason: string
+    readonly shouldComment: boolean
 }
