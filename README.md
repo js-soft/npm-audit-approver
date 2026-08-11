@@ -10,7 +10,7 @@ The app approves a pull request only when all of these conditions are true:
 - The pull request adds at most 2 new top-level exception entries to `.nsprc`.
 - Every added `.nsprc` exception has a `severity` field of `low`, `medium`, or `moderate`.
 
-Approvals are submitted without a review body. When the app does not approve a pull request, it adds a pull request comment explaining why.
+Approvals are submitted without a review body. When the app does not approve a pull request, it adds a pull request comment explaining why, unless none of the pull request commits were authored by the configured approved author.
 
 ## GitHub App Setup
 
