@@ -5,7 +5,14 @@ import test from "node:test"
 
 import { GitHubClient } from "./github.js"
 import { createAppServer } from "./server.js"
-import type { AppConfig, IssueComment, PullRequestCommit, PullRequestFile, PullRequestReview } from "./types.js"
+import type {
+    AppConfig,
+    IssueComment,
+    PullRequestCommit,
+    PullRequestFile,
+    PullRequestReview,
+    PullRequestReviewTeam
+} from "./types.js"
 
 test("approves only once when duplicate pull request webhooks are processed concurrently", async () => {
     const githubClient = new FakeGitHubClient()
@@ -40,13 +47,31 @@ test("comments only once when duplicate pull request webhooks are processed conc
         ])
 
         assert.equal(githubClient.comments.length, 1)
+        assert.equal(githubClient.reviewTeams.length, 1)
+        assert.equal(githubClient.reviewTeams[0]?.slug, "npm-dependency-update-reviewers")
         assert.equal(responses.filter((response) => response.alreadyCommented === true).length, 1)
+        assert.equal(responses.filter((response) => response.alreadyReviewRequested === true).length, 1)
+    })
+})
+
+test("requests team review even when non-approval is not commented", async () => {
+    const githubClient = new FakeGitHubClient({
+        commits: [commit("1111111", "person@example.com")]
+    })
+
+    await withTestServer(githubClient, async (url) => {
+        const response = await postWebhook(url, pullRequestPayload())
+
+        assert.equal(response.commentSkipped, true)
+        assert.equal(githubClient.comments.length, 0)
+        assert.deepEqual(githubClient.reviewTeams, [{ slug: "npm-dependency-update-reviewers" }])
     })
 })
 
 class FakeGitHubClient extends GitHubClient {
     public readonly comments: IssueComment[] = []
     public readonly reviews: PullRequestReview[] = []
+    public readonly reviewTeams: PullRequestReviewTeam[] = []
     private readonly baseNsprcContent?: string
     private readonly commits: PullRequestCommit[]
     private readonly files: PullRequestFile[]
@@ -94,6 +119,18 @@ class FakeGitHubClient extends GitHubClient {
             commit_id: "head-sha",
             state: "APPROVED"
         })
+    }
+
+    public override async listRequestedPullRequestReviewTeams(): Promise<PullRequestReviewTeam[]> {
+        await delay(10)
+        return [...this.reviewTeams]
+    }
+
+    public override async requestPullRequestTeamReviewers(input: {
+        readonly teamReviewers: readonly string[]
+    }): Promise<void> {
+        await delay(10)
+        this.reviewTeams.push(...input.teamReviewers.map((slug) => ({ slug })))
     }
 
     public override async listIssueComments(): Promise<IssueComment[]> {

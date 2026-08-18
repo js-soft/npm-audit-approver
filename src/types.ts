@@ -58,6 +58,10 @@ export interface PullRequestReview {
     readonly state: string
 }
 
+export interface PullRequestReviewTeam {
+    readonly slug: string
+}
+
 export interface ApprovalInput {
     readonly approvedAuthorEmail: string
     readonly baseNsprcContent?: string

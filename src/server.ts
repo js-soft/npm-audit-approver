@@ -5,6 +5,8 @@ import { verifyWebhookSignature } from "./crypto.js"
 import { GitHubClient } from "./github.js"
 import type { AppConfig, PullRequestWebhookPayload } from "./types.js"
 
+const manualReviewTeamSlug = "npm-dependency-update-reviewers"
+
 export function createAppServer(
     config: AppConfig,
     githubClient = new GitHubClient(config.appId, config.privateKey)
@@ -155,10 +157,29 @@ async function handleWebhook(
                 }
             }
 
+            const requestedReviewTeams = await githubClient.listRequestedPullRequestReviewTeams({
+                owner,
+                pullNumber,
+                repo,
+                token
+            })
+            const alreadyReviewRequested = requestedReviewTeams.some((team) => team.slug === manualReviewTeamSlug)
+
+            if (!alreadyReviewRequested) {
+                await githubClient.requestPullRequestTeamReviewers({
+                    owner,
+                    pullNumber,
+                    repo,
+                    teamReviewers: [manualReviewTeamSlug],
+                    token
+                })
+            }
+
             console.info(`Skipping ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
             sendJson(response, 202, {
                 approved: false,
                 alreadyCommented,
+                alreadyReviewRequested,
                 commentSkipped: !decision.shouldComment,
                 reason: decision.reason
             })

@@ -1,7 +1,13 @@
 import { Octokit } from "@octokit/rest"
 
 import { createAppJwt } from "./crypto.js"
-import type { IssueComment, PullRequestCommit, PullRequestFile, PullRequestReview } from "./types.js"
+import type {
+    IssueComment,
+    PullRequestCommit,
+    PullRequestFile,
+    PullRequestReview,
+    PullRequestReviewTeam
+} from "./types.js"
 
 export class GitHubClient {
     public constructor(
@@ -121,6 +127,38 @@ export class GitHubClient {
             owner: input.owner,
             pull_number: input.pullNumber,
             repo: input.repo
+        })
+    }
+
+    public async listRequestedPullRequestReviewTeams(input: {
+        readonly owner: string
+        readonly repo: string
+        readonly pullNumber: number
+        readonly token: string
+    }): Promise<PullRequestReviewTeam[]> {
+        const response = await this.createClient(input.token).rest.pulls.listRequestedReviewers({
+            owner: input.owner,
+            pull_number: input.pullNumber,
+            repo: input.repo
+        })
+
+        return response.data.teams.map((team) => ({
+            slug: team.slug
+        }))
+    }
+
+    public async requestPullRequestTeamReviewers(input: {
+        readonly owner: string
+        readonly repo: string
+        readonly pullNumber: number
+        readonly teamReviewers: readonly string[]
+        readonly token: string
+    }): Promise<void> {
+        await this.createClient(input.token).rest.pulls.requestReviewers({
+            owner: input.owner,
+            pull_number: input.pullNumber,
+            repo: input.repo,
+            team_reviewers: [...input.teamReviewers]
         })
     }
 
