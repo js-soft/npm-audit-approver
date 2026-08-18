@@ -9,6 +9,8 @@ export function createAppServer(
     config: AppConfig,
     githubClient = new GitHubClient(config.appId, config.privateKey)
 ): Server {
+    const pullRequestLocks: PullRequestLocks = new Map()
+
     return createServer(async (request, response) => {
         try {
             if (request.method === "GET" && request.url === "/healthz") {
@@ -17,7 +19,7 @@ export function createAppServer(
             }
 
             if (request.method === "POST" && request.url === "/webhook") {
-                await handleWebhook(request, response, config, githubClient)
+                await handleWebhook(request, response, config, githubClient, pullRequestLocks)
                 return
             }
 
@@ -33,7 +35,8 @@ async function handleWebhook(
     request: IncomingMessage,
     response: ServerResponse,
     config: AppConfig,
-    githubClient: GitHubClient
+    githubClient: GitHubClient,
+    pullRequestLocks: PullRequestLocks
 ): Promise<void> {
     const body = await readRequestBody(request)
     const signature = getHeader(request, "x-hub-signature-256")
@@ -77,115 +80,147 @@ async function handleWebhook(
     const owner = payload.repository.owner.login
     const repo = payload.repository.name
     const pullNumber = payload.pull_request.number
-    const token = await githubClient.createInstallationAccessToken(installationId)
-    const [commits, files] = await Promise.all([
-        githubClient.listPullRequestCommits({
-            owner,
-            pullNumber,
-            repo,
-            token
-        }),
-        githubClient.listPullRequestFiles({
-            owner,
-            pullNumber,
-            repo,
-            token
-        })
-    ])
-    const nsprcChanged = files.some((file) => file.filename === ".nsprc")
-    const [baseNsprcContent, headNsprcContent] = nsprcChanged
-        ? await Promise.all([
-              githubClient.getRepositoryFileText({
-                  owner,
-                  path: ".nsprc",
-                  ref: payload.pull_request.base.sha,
-                  repo,
-                  token
-              }),
-              githubClient.getRepositoryFileText({
-                  owner,
-                  path: ".nsprc",
-                  ref: payload.pull_request.head.sha,
-                  repo,
-                  token
-              })
-          ])
-        : [undefined, undefined]
-    const decision = await decideApproval({
-        approvedAuthorEmail: config.approvedAuthorEmail,
-        baseNsprcContent,
-        commits,
-        files,
-        getVulnerabilitySeverity: (id) =>
-            githubClient.getGlobalSecurityAdvisorySeverity({
-                ghsaId: id,
+    const lockKey = `${owner}/${repo}#${pullNumber}`
+
+    await withPullRequestLock(pullRequestLocks, lockKey, async () => {
+        const token = await githubClient.createInstallationAccessToken(installationId)
+        const [commits, files] = await Promise.all([
+            githubClient.listPullRequestCommits({
+                owner,
+                pullNumber,
+                repo,
                 token
             }),
-        headNsprcContent,
-        labels: payload.pull_request.labels ?? []
-    })
-
-    if (!decision.approve) {
-        let alreadyCommented = false
-
-        if (decision.shouldComment) {
-            const commentBody = `Automatic approval was not made because ${decision.reason}.`
-            const existingComments = await githubClient.listIssueComments({
-                issueNumber: pullNumber,
+            githubClient.listPullRequestFiles({
                 owner,
+                pullNumber,
                 repo,
                 token
             })
-            alreadyCommented = existingComments.some((comment) => comment.body === commentBody)
+        ])
+        const nsprcChanged = files.some((file) => file.filename === ".nsprc")
+        const [baseNsprcContent, headNsprcContent] = nsprcChanged
+            ? await Promise.all([
+                  githubClient.getRepositoryFileText({
+                      owner,
+                      path: ".nsprc",
+                      ref: payload.pull_request.base.sha,
+                      repo,
+                      token
+                  }),
+                  githubClient.getRepositoryFileText({
+                      owner,
+                      path: ".nsprc",
+                      ref: payload.pull_request.head.sha,
+                      repo,
+                      token
+                  })
+              ])
+            : [undefined, undefined]
+        const decision = await decideApproval({
+            approvedAuthorEmail: config.approvedAuthorEmail,
+            baseNsprcContent,
+            commits,
+            files,
+            getVulnerabilitySeverity: (id) =>
+                githubClient.getGlobalSecurityAdvisorySeverity({
+                    ghsaId: id,
+                    token
+                }),
+            headNsprcContent,
+            labels: payload.pull_request.labels ?? []
+        })
 
-            if (!alreadyCommented) {
-                await githubClient.createIssueComment({
-                    body: commentBody,
+        if (!decision.approve) {
+            let alreadyCommented = false
+
+            if (decision.shouldComment) {
+                const commentBody = `Automatic approval was not made because ${decision.reason}.`
+                const existingComments = await githubClient.listIssueComments({
                     issueNumber: pullNumber,
                     owner,
                     repo,
                     token
                 })
+                alreadyCommented = existingComments.some((comment) => comment.body === commentBody)
+
+                if (!alreadyCommented) {
+                    await githubClient.createIssueComment({
+                        body: commentBody,
+                        issueNumber: pullNumber,
+                        owner,
+                        repo,
+                        token
+                    })
+                }
             }
+
+            console.info(`Skipping ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
+            sendJson(response, 202, {
+                approved: false,
+                alreadyCommented,
+                commentSkipped: !decision.shouldComment,
+                reason: decision.reason
+            })
+            return
         }
 
-        console.info(`Skipping ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
-        sendJson(response, 202, {
-            approved: false,
-            alreadyCommented,
-            commentSkipped: !decision.shouldComment,
-            reason: decision.reason
+        const existingReviews = await githubClient.listPullRequestReviews({
+            owner,
+            pullNumber,
+            repo,
+            token
         })
-        return
-    }
+        const alreadyApproved = existingReviews.some(
+            (review) =>
+                review.state === "APPROVED" &&
+                review.commit_id === payload.pull_request.head.sha
+        )
 
-    const existingReviews = await githubClient.listPullRequestReviews({
-        owner,
-        pullNumber,
-        repo,
-        token
+        if (alreadyApproved) {
+            console.info(`Already approved ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
+            sendJson(response, 202, { approved: true, alreadyApproved: true, reason: decision.reason })
+            return
+        }
+
+        await githubClient.approvePullRequest({
+            owner,
+            pullNumber,
+            repo,
+            token
+        })
+
+        console.info(`Approved ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
+        sendJson(response, 202, { approved: true, reason: decision.reason })
     })
-    const alreadyApproved = existingReviews.some(
-        (review) =>
-            review.state === "APPROVED" &&
-            review.commit_id === payload.pull_request.head.sha
-    )
+}
 
-    if (alreadyApproved) {
-        console.info(`Already approved ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
-        sendJson(response, 202, { approved: true, alreadyApproved: true, reason: decision.reason })
-        return
-    }
+type PullRequestLocks = Map<string, Promise<void>>
 
-    await githubClient.approvePullRequest({
-        owner,
-        pullNumber,
-        repo,
-        token
+async function withPullRequestLock<T>(
+    locks: PullRequestLocks,
+    key: string,
+    task: () => Promise<T>
+): Promise<T> {
+    const previous = locks.get(key) ?? Promise.resolve()
+    let release!: () => void
+    const next = new Promise<void>((resolve) => {
+        release = resolve
     })
+    const current = previous.catch(() => undefined).then(() => next)
 
-    console.info(`Approved ${owner}/${repo}#${pullNumber}: ${decision.reason}`)
-    sendJson(response, 202, { approved: true, reason: decision.reason })
+    locks.set(key, current)
+    await previous.catch(() => undefined)
+
+    try {
+        return await task()
+    } finally {
+        release()
+
+        if (locks.get(key) === current) {
+            locks.delete(key)
+        }
+    }
 }
 
 function getHeader(request: IncomingMessage, headerName: string): string | undefined {
