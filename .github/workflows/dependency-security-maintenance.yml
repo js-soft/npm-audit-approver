@@ -11,6 +11,7 @@ jobs:
   npm-audit:
     uses: js-soft/github-actions/.github/workflows/dependency-security-maintenance.yml@main
     with:
+      node-version-file: .nvmrc
       reviewers: js-soft/npm-dependency-update-reviewers
     secrets:
       github-token: ${{ secrets.GH_PAT }}
