@@ -37,5 +37,6 @@
     "jest.nodeEnv": {
         "DATABASE_CONNECTION_STRING": "mongodb://localhost:27018"
     },
-    "js/ts.tsdk.path": "node_modules/typescript/lib"
+    "js/ts.experimental.useTsgo": true,
+    "js/ts.tsdk.path": "./node_modules/typescript"
 }
